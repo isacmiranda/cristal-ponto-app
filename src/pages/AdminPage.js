@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from 'react'; 
+import React, { useEffect, useState, useRef } from 'react'; 
 import { useNavigate } from 'react-router-dom';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 export default function AdminPage() {
   const [registros, setRegistros] = useState([]);
@@ -22,20 +24,44 @@ export default function AdminPage() {
   });
 
   const [ordenacao, setOrdenacao] = useState({ campo: '', direcao: 'asc' });
+  const [estaFiltrado, setEstaFiltrado] = useState(false);
+  const [resumo, setResumo] = useState({ entrada: 0, intervaloIda: 0, intervaloVolta: 0, saida: 0 });
 
   const navigate = useNavigate();
+  const tableRef = useRef(null);
 
   useEffect(() => {
     const localRegistros = localStorage.getItem('registros');
     const localFuncionarios = localStorage.getItem('funcionarios');
     if (localRegistros) {
       const data = JSON.parse(localRegistros);
-      data.sort(multiSort); // usa ordenação multi-colunas
+      data.sort(multiSort);
       setTodosRegistros(data);
-      setRegistros(data);
+      if (!estaFiltrado) {
+        setRegistros(data);
+        calcularResumo(data);
+      }
     }
     if (localFuncionarios) setFuncionarios(JSON.parse(localFuncionarios));
-  }, []);
+  }, [estaFiltrado]);
+
+  const calcularResumo = (dados) => {
+    const contagem = {
+      entrada: 0,
+      intervaloIda: 0,
+      intervaloVolta: 0,
+      saida: 0
+    };
+
+    dados.forEach(registro => {
+      if (registro.tipo === 'entrada') contagem.entrada++;
+      else if (registro.tipo === 'intervalo ida') contagem.intervaloIda++;
+      else if (registro.tipo === 'intervalo volta') contagem.intervaloVolta++;
+      else if (registro.tipo === 'saida') contagem.saida++;
+    });
+
+    setResumo(contagem);
+  };
 
   const handleBuscar = () => {
     const inicio = new Date(filtroInicio);
@@ -52,6 +78,8 @@ export default function AdminPage() {
       })
       .sort(multiSort);
     setRegistros(filtrados);
+    calcularResumo(filtrados);
+    setEstaFiltrado(true);
     setPaginaAtual(1);
   };
 
@@ -61,6 +89,8 @@ export default function AdminPage() {
     setFiltroFim('');
     setFiltroNome('');
     setFiltroPIN('');
+    calcularResumo(todosRegistros);
+    setEstaFiltrado(false);
     setPaginaAtual(1);
   };
 
@@ -85,7 +115,12 @@ export default function AdminPage() {
     const atualizados = [novo, ...todosRegistros];
     atualizados.sort(multiSort);
     setTodosRegistros(atualizados);
-    setRegistros(atualizados);
+    
+    if (!estaFiltrado) {
+      setRegistros(atualizados);
+      calcularResumo(atualizados);
+    }
+    
     localStorage.setItem('registros', JSON.stringify(atualizados));
     setNovoRegistro({ data: '', horario: '', nome: '', tipo: '', pin: '' });
   };
@@ -108,7 +143,12 @@ export default function AdminPage() {
       }).sort(multiSort);
 
       setTodosRegistros(registrosAtualizados);
-      setRegistros(registrosAtualizados);
+      
+      if (!estaFiltrado) {
+        setRegistros(registrosAtualizados);
+        calcularResumo(registrosAtualizados);
+      }
+      
       localStorage.setItem('registros', JSON.stringify(registrosAtualizados));
     }
   };
@@ -143,6 +183,7 @@ export default function AdminPage() {
         todosAtu.sort(multiSort);
         setTodosRegistros(todosAtu);
         localStorage.setItem('registros', JSON.stringify(todosAtu));
+        calcularResumo(novosReg);
       }
     }
   };
@@ -159,19 +200,18 @@ export default function AdminPage() {
     setRegistros(novosReg);
     setTodosRegistros(novosTodos);
     localStorage.setItem('registros', JSON.stringify(novosTodos));
+    calcularResumo(novosReg);
   };
 
-  // Função de ordenação multi-colunas
   const multiSort = (a, b) => {
     const parseData = d => new Date(d.split('/').reverse().join('-'));
-    let res = parseData(b.data) - parseData(a.data); // Data descendente
+    let res = parseData(b.data) - parseData(a.data);
     if (res === 0) res = a.horario.localeCompare(b.horario);
     if (res === 0) res = a.nome.localeCompare(b.nome);
     if (res === 0) res = a.tipo.localeCompare(b.tipo);
     return res;
   };
 
-  // Função de ordenação clicando no cabeçalho
   const ordenarPor = (campo) => {
     let direcao = 'asc';
     if (ordenacao.campo === campo && ordenacao.direcao === 'asc') {
@@ -198,6 +238,70 @@ export default function AdminPage() {
     });
 
     setRegistros(registrosOrdenados);
+  };
+
+  const downloadPDF = () => {
+    const doc = new jsPDF('landscape', 'mm', 'a4');
+    
+    // Título
+    doc.setFontSize(16);
+    doc.text('Relatório de Ponto - Cristal Acquacenter', 14, 15);
+    doc.setFontSize(10);
+    
+    // Período
+    if (estaFiltrado) {
+      const inicio = filtroInicio ? new Date(filtroInicio).toLocaleDateString('pt-BR') : 'Sem data inicial';
+      const fim = filtroFim ? new Date(filtroFim).toLocaleDateString('pt-BR') : 'Sem data final';
+      doc.text(`Período: ${inicio} até ${fim}`, 14, 22);
+    } else {
+      doc.text('Período: Todos os registros', 14, 22);
+    }
+
+    // Resumo
+    doc.setFontSize(11);
+    doc.text(`📊 Resumo do Período:`, 14, 30);
+    doc.setFontSize(10);
+    doc.text(`✅ Entradas: ${resumo.entrada}`, 14, 37);
+    doc.text(`⏰ Início Intervalo: ${resumo.intervaloIda}`, 14, 43);
+    doc.text(`⏰ Retorno Intervalo: ${resumo.intervaloVolta}`, 14, 49);
+    doc.text(`❌ Saídas: ${resumo.saida}`, 14, 55);
+    doc.text(`📊 Total de registros: ${registros.length}`, 14, 61);
+
+    // Configurar dados para a tabela
+    const registrosParaPDF = registros.slice(0, 100); // Limitando a 100 registros por página
+    const tableData = registrosParaPDF.map(r => [r.data, r.horario, r.nome, r.tipo]);
+
+    doc.autoTable({
+      startY: 68,
+      head: [['Data', 'Horário', 'Nome', 'Tipo']],
+      body: tableData,
+      theme: 'grid',
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [41, 128, 185], textColor: [255, 255, 255] },
+      columnStyles: {
+        0: { cellWidth: 30 },
+        1: { cellWidth: 25 },
+        2: { cellWidth: 50 },
+        3: { cellWidth: 35 }
+      }
+    });
+
+    // Se houver mais de 100 registros, mostrar mensagem
+    if (registros.length > 100) {
+      const finalY = doc.lastAutoTable.finalY + 10;
+      doc.setFontSize(8);
+      doc.text(`* Mostrando apenas os primeiros 100 registros. Total: ${registros.length} registros`, 14, finalY);
+    }
+
+    // Rodapé
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')} - Página ${i} de ${pageCount}`, 14, doc.internal.pageSize.height - 10);
+    }
+
+    doc.save('relatorio_ponto_cristal.pdf');
   };
 
   const totalPaginas = Math.ceil(registros.length / registrosPorPagina);
@@ -230,6 +334,16 @@ export default function AdminPage() {
             font-weight: bold;
             margin-bottom: 10px;
           }
+          .resumo-print {
+            display: block !important;
+            background: #f0f0f0 !important;
+            padding: 10px !important;
+            margin: 10px 0 !important;
+            border-radius: 5px !important;
+          }
+        }
+        .resumo-print {
+          display: none;
         }
       `}</style>
 
@@ -288,17 +402,54 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* Botão imprimir */}
-      <div className="flex justify-end w-full max-w-4xl mb-2 no-print">
+      {/* Botões de impressão e PDF */}
+      <div className="flex justify-end w-full max-w-4xl mb-2 no-print gap-2">
         <button onClick={() => window.print()} className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-500">
-          🖨️ Imprimir Tabela
+          🖨️ Imprimir
+        </button>
+        <button onClick={downloadPDF} className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-500">
+          📄 Baixar PDF
         </button>
       </div>
 
+      {/* Resumo (visível apenas na impressão) */}
+      <div className="resumo-print w-full max-w-4xl mb-4">
+        <div className="bg-gray-100 p-4 rounded">
+          <h3 className="font-bold text-lg mb-2">📊 Resumo do Período</h3>
+          <div className="grid grid-cols-4 gap-4">
+            <div className="bg-green-100 p-2 rounded text-center">
+              <span className="font-bold">✅ Entradas:</span> {resumo.entrada}
+            </div>
+            <div className="bg-yellow-100 p-2 rounded text-center">
+              <span className="font-bold">⏰ Início Intervalo:</span> {resumo.intervaloIda}
+            </div>
+            <div className="bg-blue-100 p-2 rounded text-center">
+              <span className="font-bold">⏰ Retorno Intervalo:</span> {resumo.intervaloVolta}
+            </div>
+            <div className="bg-red-100 p-2 rounded text-center">
+              <span className="font-bold">❌ Saídas:</span> {resumo.saida}
+            </div>
+          </div>
+          <div className="mt-2 text-center font-bold">
+            Total de registros: {registros.length}
+          </div>
+        </div>
+      </div>
+
       {/* Tabela */}
-      <div className="overflow-x-auto w-full max-w-4xl">
+      <div className="overflow-x-auto w-full max-w-4xl" ref={tableRef}>
         <table className="min-w-full bg-white text-black rounded shadow">
-          <caption className="text-lg font-bold p-2">Registro de Ponto - Cristal Acquacenter</caption>
+          <caption className="text-lg font-bold p-2">
+            Registro de Ponto - Cristal Acquacenter
+            <div className="text-sm font-normal mt-1">
+              {estaFiltrado && (
+                <span>
+                  Período: {filtroInicio ? new Date(filtroInicio).toLocaleDateString('pt-BR') : 'Sem data inicial'} 
+                  até {filtroFim ? new Date(filtroFim).toLocaleDateString('pt-BR') : 'Sem data final'}
+                </span>
+              )}
+            </div>
+          </caption>
           <thead>
             <tr className="bg-blue-200">
               <th className="p-2 cursor-pointer" onClick={() => ordenarPor('data')}>
